@@ -1,1 +1,93 @@
-# virtual_run
+# 虚拟跑步 / Virtual Run
+
+Windows 桌面路线模拟与 Android 定位测试工具，桌面版本为 **1.4.3**。通过官方 Android Emulator 和 ADB 操作测试界面，支持路线预览、起点准备、登录、短时试跑、每日定时任务与一键停用。仓库同时包含独立 Android 模拟位置应用源码。
+
+本仓库发布本项目源码，**不包含安小信 APK、反编译代码、账号、运行日志、Android SDK、系统镜像或安装包**。安小信是独立第三方应用，不受本项目 MIT 许可证覆盖；需要自行取得有权使用的安装包。此工具适用于有授权的定位与界面测试，请遵守目标服务的规则，不将模拟轨迹冒充真实运动记录。
+
+## 从源码启动 Windows 程序
+
+需要 Windows 10/11 x64、Python 3.12 x64（包含 Tkinter），以及可用的硬件虚拟化。日常运行使用 Python 标准库，不需要安装 pip 依赖。
+
+```powershell
+git clone https://github.com/suiyuan1145/virtual_run.git
+cd virtual_run
+python -X utf8 android_location_test.py
+```
+
+也可双击 `启动虚拟跑步.cmd`。程序的“首次安装”可联网下载官方 Android Emulator、Platform Tools 和 Android 11 镜像；阅读并同意 SDK 许可后操作。已有环境可在“设置”中填写 SDK 和 AVD。
+
+首次使用步骤：
+
+1. 准备环境并启动模拟器，选择已连接的官方虚拟设备。
+2. 点击“安装原版 APK”，选择自己取得的安小信安装包。本项目针对 2.0.5 / x86 安装进行过测试。
+3. 手动完成隐私和权限提示，使用自己的账号登录，确认地图和起点。
+4. 在“晨跑与登录”保存参数，先执行短时试跑，检查自动开始与结束。
+5. 需要定时测试时启用每日任务：北京时间 06:55 准备，07:00–08:00 运行，默认 12 km/h、半径 150 米。
+
+电脑须开机、网络可用且当前 Windows 用户已登录。关闭桌面界面不会停用每日任务；“一键停用”会取消当前操作、停用后续任务，并在确认结束自己创建的记录后关闭指定模拟器。遇到无法确认结束或已有手动记录时保留模拟器供检查。
+
+无窗口模拟器通过 ADB 执行 Android 内部点击，不依赖桌面鼠标焦点。第一次登录和权限确认请使用可见窗口。
+
+## 数据与验证边界
+
+个人数据默认在 `%LOCALAPPDATA%\VirtualRunDesktop`，也可通过 `VIRTUAL_RUN_DATA_DIR` 指定。可选保存的账号密码使用 Windows DPAPI 加密，仅当前电脑的当前用户可解密；换电脑需要重新填写。个人配置、轨迹、截图和日志不应提交到仓库。
+
+已进行短时自动开始、坐标发送、结束与停止流程测试。坐标命令成功、脚本结束成功，不代表第三方服务认可该记录；完整定时运行需要在使用者自己的环境中验证。
+
+`morning/monitor_next_morning.py` 是只读检查工具，记录计划任务状态、发送进度和结束结果，不点击界面、不发送定位。可用以下命令安排次日 06:56、07:05、07:30、08:05 的一次性检查：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\morning\安排次日晨跑检查.ps1
+```
+
+报告默认保存到本仓库 `analysis/晨跑检查-日期/`，该目录已忽略。检查任务不是聊天通知，也不能证明第三方平台接受测试数据。
+
+## 构建 Windows EXE
+
+安装完整 Python 3.12 x64，并准备本机 Android SDK Platform Tools。构建脚本使用 Windows .NET Framework 自带的 C# 编译器，不要求安装 Visual Studio。
+
+构建完整包前，将自己有权使用的原版 APK 放到 `analysis/input.apk`（Git 忽略）。构建包会包含该第三方 APK，发布生成的完整包前需自行确认相应分发许可。
+
+```powershell
+$env:ANDROID_SDK_ROOT = 'C:\Android\Sdk'
+python build_windows.py
+```
+
+产物为 `dist/虚拟跑步-1.4.3-Windows.exe` 和完整 ZIP，包含本地 Python、ADB、说明、快捷方式与卸载器。仓库不提供预编译安装包。图标已提供；仅重新生成图标时需要 Pillow。
+
+## Android 源码
+
+独立 Android 应用位于 `android/`，通过 Android 官方模拟位置接口发布测试坐标，不修改安小信或隐藏模拟位置标记。真机可能拒绝模拟定位；桌面模拟器测试结果不能推断真机兼容性。
+
+构建需要 JDK 21、Android SDK Platform 35 和 Build Tools 36.0.0：
+
+```powershell
+python android/build_apk.py --sdk 'C:\Android\Sdk' --java 'C:\Java\jdk-21'
+```
+
+本机签名设置与密钥在 `android/signing/`，不会提交。完整说明见 [Android README](android/README.md)。
+
+## 测试与目录
+
+```powershell
+python -m unittest discover -s . -p 'test_*.py' -v
+```
+
+测试使用临时目录、模拟对象和公开样例参数，不需要真实账号，不会创建第三方运动记录。
+
+| 目录或文件 | 内容 |
+| --- | --- |
+| `android_location_test.py` | Tkinter 主界面 |
+| `android_setup.py` | 官方组件下载、校验与虚拟设备准备 |
+| `morning_run.py`、`morning_support.py` | 定时执行与个人配置生成 |
+| `login_support.py`、`stop_support.py` | 登录与停止协作 |
+| `launcher/` | C# Windows 启动器和卸载器 |
+| `morning/` | PowerShell / CMD 任务脚本与只读检查 |
+| `android/` | 独立 Android 应用 |
+| `docs/` | 使用指南与首次安装说明 |
+| `licenses/`、`THIRD_PARTY_LICENSES.txt` | 第三方许可声明 |
+| `index.html` | 离线路线预览 |
+
+## 许可证
+
+本项目自编写源码使用 [MIT License](LICENSE)。坐标转换公式等第三方内容保留各自许可，见 [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) 和 `licenses/`。Android SDK、Python 运行时与安小信等独立第三方组件不因本项目开源而改用 MIT 许可证。

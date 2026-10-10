@@ -1,0 +1,13 @@
+{
+  "python": "C:/Python312/python.exe",
+  "sdk": "C:/Android/Sdk",
+  "avd": "VirtualRun_API30",
+  "start": "07:00",
+  "end": "08:00",
+  "speed_kmh": 12,
+  "radius_m": 150,
+  "anchor_wgs84": [31.2304, 121.4737],
+  "max_origin_gap_m": 2000,
+  "headless": false,
+  "auto_login": false
+}
