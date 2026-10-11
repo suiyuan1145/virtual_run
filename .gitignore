@@ -37,6 +37,7 @@ android/signing/
 login.dat
 settings.json
 晨跑配置.json
+即时测试配置.json
 local-signing.json
 daily-state.json
 morning.lock

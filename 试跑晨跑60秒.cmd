@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 set "TRIAL_RUNTIME=%~dp0runtime"
-if not exist "%TRIAL_RUNTIME%\python.exe" set "TRIAL_RUNTIME=%~dp0dist\虚拟跑步-1.4.3\runtime"
+if not exist "%TRIAL_RUNTIME%\python.exe" set "TRIAL_RUNTIME=%~dp0dist\虚拟跑步-1.4.4\runtime"
 set "TRIAL_DATA=%LOCALAPPDATA%\VirtualRunDesktop"
 if defined VIRTUAL_RUN_DATA_DIR set "TRIAL_DATA=%VIRTUAL_RUN_DATA_DIR%"
 if not exist "%TRIAL_DATA%\morning\晨跑配置.json" (

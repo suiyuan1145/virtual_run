@@ -4,9 +4,9 @@ VSVersionInfo(
   kids=[StringFileInfo([StringTable('080404B0', [
     StringStruct('CompanyName', 'VirtualRun Desktop'),
     StringStruct('FileDescription', '虚拟跑步 · 安卓定位测试'),
-    StringStruct('FileVersion', '1.1.0'),
+    StringStruct('FileVersion', '1.4.4'),
     StringStruct('InternalName', 'VirtualRun'),
     StringStruct('OriginalFilename', '虚拟跑步.exe'),
     StringStruct('ProductName', '虚拟跑步'),
-    StringStruct('ProductVersion', '1.1.0')])]),
+    StringStruct('ProductVersion', '1.4.4')])]),
     VarFileInfo([VarStruct('Translation', [2052, 1200])])])

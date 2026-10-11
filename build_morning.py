@@ -23,7 +23,7 @@ def main():
     shutil.copyfile(ROOT / 'LICENSE', OUT / 'LICENSE')
     with zipfile.ZipFile(ROOT / 'dist/晨跑定时器-Windows.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
         for file in OUT.rglob('*'):
-            if file.is_file() and '__pycache__' not in file.parts and 'logs' not in file.parts and file.name not in ('daily-state.json', 'morning.lock', 'login.dat', '晨跑配置.json', '验证结果.md', 'disabled.flag', 'stop-all.request') and file.suffix not in ('.exe', '.request', '.tmp'):
+            if file.is_file() and '__pycache__' not in file.parts and 'logs' not in file.parts and file.name not in ('daily-state.json', 'morning.lock', 'login.dat', '晨跑配置.json', '即时测试配置.json', '验证结果.md', 'disabled.flag', 'stop-all.request') and file.suffix not in ('.exe', '.request', '.tmp'):
                 archive.write(file, file.relative_to(OUT.parent))
     print('Built', OUT)
 

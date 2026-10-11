@@ -59,7 +59,7 @@ def main():
     from build_exe import compile_launcher, compile_uninstaller
     compile_launcher(OUT / '虚拟跑步.exe')
     compile_uninstaller(OUT / '卸载虚拟跑步.exe')
-    private_names = {'login.dat', 'settings.json', '晨跑配置.json', '验证结果.md',
+    private_names = {'login.dat', 'settings.json', '晨跑配置.json', '即时测试配置.json', '验证结果.md',
                      'daily-state.json', 'morning.lock', 'disabled.flag', 'stop-all.request', '.complete', '.shortcuts-created', '.installation.json'}
     def packaged(file):
         return file.is_file() and '__pycache__' not in file.parts and 'logs' not in file.parts and file.name not in private_names and not file.name.endswith('.request')

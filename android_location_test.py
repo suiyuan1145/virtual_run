@@ -144,14 +144,12 @@ def gui(smoke_output=None):
     disabling = False
     worker_thread = None
     samples = []
-    prepared = None
-    route_key = None
     device = tk.StringVar()
     settings = load_settings()
     frame = ttk.Frame(notebook, padding=14)
     notebook.add(frame, text='跑步测试')
     ttk.Label(frame, text='虚拟跑步', font=('Microsoft YaHei', 22, 'bold')).pack(anchor='w')
-    ttk.Label(frame, text='读取安小信位置 → 准备起点 → 在安小信开始新测试 → 开始环形定位。准备起点时请勿记录跑步。').pack(anchor='w', pady=8)
+    ttk.Label(frame, text='填写速度和时长 → 一键开始测试。自动读取当前位置、准备、开始和结束；支持后台模拟器。').pack(anchor='w', pady=8)
     top = ttk.Frame(frame)
     top.pack(fill='x', pady=5)
     combo = ttk.Combobox(top, textvariable=device, state='readonly', width=35)
@@ -195,13 +193,6 @@ def gui(smoke_output=None):
                      if len(line.split()) >= 2 and line.split()[1] == 'device']
             events.put(('devices', found))
             events.put(('log', result if found else '没有可用设备。请先启动安卓模拟器；未授权或离线设备不能测试。\n' + result))
-            if found:
-                serial = next((x for x in found if x.startswith('emulator-')), found[0])
-                try:
-                    lat, lon, source = app_location(serial)
-                    events.put(('origin', (serial, lat, lon, source)))
-                except RuntimeError as exc:
-                    events.put(('log', str(exc) + '\n请进入智慧运动地图页，再点击“读取安小信位置”。'))
         work(task)
 
     def start_emulator():
@@ -273,131 +264,45 @@ def gui(smoke_output=None):
     add_button(top, '打开安小信', lambda: action(launch))
     form = ttk.Frame(frame)
     form.pack(fill='x', pady=12)
-    fields = {}
+    fields = {'lat': tk.StringVar(), 'lon': tk.StringVar()}
     for col, (key, label, value) in enumerate([
-        ('lat', '纬度 WGS84', ''), ('lon', '经度 WGS84', ''),
-        ('radius', '路线半径 / 米', '150'), ('speed', '速度 / km/h', '6'), ('seconds', '测试时长 / 秒', '30')]):
+        ('speed', '速度 / km/h', '12'), ('seconds', '运动时长 / 秒', '60'),
+        ('radius', '路线半径 / 米', '150')]):
         group = ttk.Frame(form)
         group.grid(row=0, column=col, padx=6, sticky='ew')
         form.columnconfigure(col, weight=1)
         ttk.Label(group, text=label).pack(anchor='w')
-        v = tk.StringVar(value=str(settings.get(key, value)) if key in ('radius', 'speed', 'seconds') else value)
-        ttk.Entry(group, textvariable=v, width=14).pack(fill='x')
+        v = tk.StringVar(value=str(settings.get(key, value)))
+        ttk.Entry(group, textvariable=v, width=18).pack(fill='x')
         fields[key] = v
 
-    def config():
-        if not fields['lat'].get().strip() or not fields['lon'].get().strip():
-            raise ValueError('请先点击“读取安小信位置”，或读取系统 GPS / 手动填写起点。')
-        c = {k: float(v.get()) for k, v in fields.items()}
+    def test_parameters():
+        c = {key: float(fields[key].get()) for key in ('speed', 'radius', 'seconds')}
         if not all(math.isfinite(v) for v in c.values()):
             raise ValueError('参数必须是有限数字。')
-        if not (-85 <= c['lat'] <= 85 and -180 <= c['lon'] <= 180 and
-                10 <= c['radius'] <= 10000 and .5 <= c['speed'] <= 30 and 1 <= c['seconds'] <= 3600):
-            raise ValueError('纬度 ±85，经度 ±180；半径 10–10000 米，速度 0.5–30 km/h，时长 1–3600 秒。')
+        if not (.5 <= c['speed'] <= 30 and 10 <= c['radius'] <= 10000
+                and 1 <= c['seconds'] <= 3600 and c['seconds'].is_integer()):
+            raise ValueError('速度 0.5–30 km/h，半径 10–10000 米，时长为 1–3600 的整数秒。')
         return c
 
     buttons = ttk.Frame(frame)
-    origin_buttons = ttk.Frame(frame)
-    origin_buttons.pack(fill='x', pady=(0, 8))
-    ready_text = tk.StringVar(value='尚未读取和准备起点')
-    ttk.Label(origin_buttons, textvariable=ready_text).pack(side='right')
     buttons.pack(fill='x')
 
-    def invalidate_origin(*_):
-        nonlocal prepared
-        prepared = None
-        ready_text.set('起点未准备；请先准备起点')
-
-    device.trace_add('write', invalidate_origin)
-    fields['lat'].trace_add('write', invalidate_origin)
-    fields['lon'].trace_add('write', invalidate_origin)
-
-    def signature(serial, c):
-        return (serial, c['lat'], c['lon'])
-
-    def read_origin(from_app=True):
-        serial = selected()
-        def task():
-            if from_app:
-                lat, lon, source = app_location(serial)
-            else:
-                lat, lon = current_location(serial)
-                source = '已读取模拟器当前系统 GPS 位置'
-            events.put(('origin', (serial, lat, lon, source)))
-        work(task)
-
-    add_button(origin_buttons, '读取安小信位置', lambda: action(read_origin))
-    add_button(origin_buttons, '读取系统 GPS', lambda: action(lambda: read_origin(False)))
-
-    def single():
-        serial, c = selected(), config()
-        invalidate_origin()
-        samples.clear()
-        paint()
-        stop.clear()
-        def task():
-            events.put(('log', '正在静止准备起点（15 秒），此时请勿在安小信记录跑步。'))
-            started = time.monotonic()
-            while not stop.is_set():
-                send_location(serial, c['lat'], c['lon'], 0)
-                if time.monotonic() - started >= 15:
-                    gap = distance_meters(current_location(serial), (c['lat'], c['lon']))
-                    if gap > 15:
-                        raise RuntimeError(f'系统 GPS 仍距起点 {gap:.1f} 米，请重新准备。')
-                    events.put(('ready', signature(serial, c)))
-                    events.put(('log', '系统 GPS 已稳定在起点。确认安小信地图位置稳定，再开始新的测试记录，然后启动环形定位。'))
-                    return
-                if stop.wait(1):
-                    break
-            events.put(('log', '起点准备已取消，请重新准备。'))
-        work(task)
-
-    add_button(origin_buttons, '准备起点（15 秒）', lambda: action(single))
-
     def route():
-        nonlocal route_key
-        serial, c = selected(), config()
-        if not serial.startswith('emulator-'):
-            raise RuntimeError('环形测试需要官方 Android Emulator。')
-        if prepared != signature(serial, c):
-            raise RuntimeError('请先读取位置并准备起点，确认安小信地图稳定后，再开始新的测试记录。')
-        key = (*signature(serial, c), c['radius'])
-        if samples and key != route_key:
-            invalidate_origin()
-            raise RuntimeError('路线参数已改变，请重新准备起点并开始新的测试。')
-        origin_distance = samples[-1]['distance'] if samples else 0
-        origin_elapsed = samples[-1]['elapsed'] if samples else 0
-        route_key = key
-        stop.clear()
+        c = test_parameters()
+        sdk, avd, headless = sdk_var.get().strip(), avd_var.get().strip(), headless_var.get()
         def task():
-            expected = circle_position(c['lat'], c['lon'], c['radius'], origin_distance)[:2]
-            gap = distance_meters(current_location(serial), expected)
-            if gap > 15:
-                events.put(('invalid', None))
-                raise RuntimeError(f'当前 GPS 距路线位置 {gap:.1f} 米，已取消启动，避免位置跳变。请重新准备起点。')
-            started = time.monotonic()
-            events.put(('log', f'以 {c["speed"]:g} km/h 测试，本段 {c["seconds"]:g} 秒；从累计 {origin_distance:.1f} 米继续。'))
-            last_position = expected
-            try:
-                while not stop.is_set():
-                    segment_time = min(time.monotonic() - started, c['seconds'])
-                    elapsed = origin_elapsed + segment_time
-                    distance = origin_distance + segment_time * c['speed'] / 3.6
-                    lat, lon, x, y = circle_position(c['lat'], c['lon'], c['radius'], distance)
-                    send_location(serial, lat, lon, c['speed'])
-                    last_position = (lat, lon)
-                    events.put(('sample', {'elapsed': elapsed, 'distance': distance, 'lat': lat, 'lon': lon,
-                                           'east': x, 'north': y, 'radius': c['radius'], 'speed_kmh': c['speed']}))
-                    if segment_time >= c['seconds']:
-                        break
-                    stop.wait(min(1, c['seconds'] - segment_time))
-            finally:
-                send_location(serial, *last_position, 0)
-            events.put(('log', '本段定位已结束，当前位置已发送零速度。请在安小信查看轨迹和里程；再次开始会从当前位置继续。'))
+            from stop_support import resume
+            path = morning_support.configure_test(sdk, avd, c['speed'], c['radius'], headless)
+            resume(morning_directory)
+            events.put(('test_reset', None))
+            events.put(('log', '正在自动准备测试；无需手动打开模拟器或点击开始、结束。'))
+            run_runner(['--test-seconds', str(int(c['seconds']))], configuration=path, channel='log')
+            events.put(('log', '测试脚本已退出；请查看结果文件确认结束状态。'))
         work(task)
 
-    add_button(buttons, '开始环形定位测试', lambda: action(route))
-    ttk.Button(buttons, text='停止', command=stop.set).pack(side='left', padx=3)
+    test_start_button = add_button(buttons, '一键开始测试', lambda: action(route))
+    ttk.Button(buttons, text='停止并结束本次测试', command=stop.set).pack(side='left', padx=3)
 
     def capture():
         serial = selected()
@@ -628,7 +533,7 @@ def gui(smoke_output=None):
         morning_form.columnconfigure(col, weight=1)
     def copy_origin():
         if not fields['lat'].get() or not fields['lon'].get():
-            raise ValueError('请先在“跑步测试”读取或填写起点。')
+            raise ValueError('请先完成一次跑步测试，或点击“读取当前 GPS 起点”。')
         morning_lat.set(fields['lat'].get())
         morning_lon.set(fields['lon'].get())
     def read_morning_origin():
@@ -663,7 +568,7 @@ def gui(smoke_output=None):
                 morning_run.ADB_PATH = original_adb
         work(task, 'morning_log')
     add_button(quick_help, '关闭模拟器', lambda: action(close_morning_emulator))
-    ttk.Button(morning_form, text='从跑步测试复制', command=lambda: action(copy_origin)).grid(row=1, column=4, padx=6)
+    ttk.Button(morning_form, text='从测试轨迹取起点', command=lambda: action(copy_origin)).grid(row=1, column=4, padx=6)
     morning_actions = ttk.Frame(morning_page)
     morning_actions.pack(fill='x')
     morning_output = tk.Text(morning_page, height=8, wrap='word', font=('Microsoft YaHei', 10))
@@ -716,10 +621,10 @@ def gui(smoke_output=None):
     add_button(morning_actions, '停用每日晨跑', lambda: work(lambda: powershell_file(RESOURCE_DIR / 'morning/停用每日晨跑.ps1', ('-MorningDirectory', str(morning_directory))), 'morning_log'))
     run_actions = ttk.Frame(morning_page)
     run_actions.pack(fill='x', pady=8)
-    def run_runner(mode):
+    def run_runner(mode, configuration=None, channel='morning_log'):
         if stop.is_set():
             raise RuntimeError('用户停止了任务。')
-        configuration = morning_directory / '晨跑配置.json'
+        configuration = configuration or morning_directory / '晨跑配置.json'
         request = morning_directory / ('stop-' + uuid.uuid4().hex + '.request')
         command = [str(morning_support.runtime_python()), '-X', 'utf8', '-u', str(morning_directory / 'morning_run.py'),
                    '--config', str(configuration), '--stop-file', str(request), *mode]
@@ -728,7 +633,13 @@ def gui(smoke_output=None):
                                  creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         def read_output():
             for line in child.stdout:
-                events.put(('morning_log', line.rstrip()))
+                if line.startswith('@virtualrun:'):
+                    try:
+                        events.put(('sample', json.loads(line[len('@virtualrun:'):])))
+                    except ValueError:
+                        events.put((channel, '轨迹进度无法解析。'))
+                else:
+                    events.put((channel, line.rstrip()))
         reader = threading.Thread(target=read_output, daemon=True)
         reader.start()
         try:
@@ -741,9 +652,9 @@ def gui(smoke_output=None):
                     time.sleep(.2)
             reader.join(timeout=3)
             if child.returncode and not stop.is_set():
-                raise RuntimeError('晨跑未完成，具体原因见上方日志与结果文件。')
+                raise RuntimeError('自动测试未完成，具体原因见日志与结果文件。')
             if stop.is_set():
-                events.put(('morning_log', '当前脚本已停止并退出，后台进程已回收。'))
+                events.put((channel, '当前脚本已停止并退出，后台进程已回收。'))
         finally:
             child.wait()
             reader.join(timeout=3)
@@ -914,7 +825,7 @@ def gui(smoke_output=None):
         canvas.create_oval(w / 2 - rr, h / 2 - rr, w / 2 + rr, h / 2 + rr, outline='#638197', dash=(5, 5))
         canvas.create_text(18, 18, text='环形路线预览', anchor='nw', fill='#afc6d8', font=('Microsoft YaHei', 11))
         if not samples:
-            canvas.create_text(w / 2, h / 2, text='准备起点后开始测试', fill='#afc6d8', font=('Microsoft YaHei', 11))
+            canvas.create_text(w / 2, h / 2, text='填写参数后点击一键开始测试', fill='#afc6d8', font=('Microsoft YaHei', 11))
             return
         coords = [n for point in samples for n in pos(point)]
         if len(coords) >= 4:
@@ -923,7 +834,7 @@ def gui(smoke_output=None):
         canvas.create_oval(x - 5, y - 5, x + 5, y + 5, fill='#aaffdd', outline='')
 
     def poll():
-        nonlocal busy, prepared, disabling
+        nonlocal busy, disabling
         while True:
             try:
                 kind, value = events.get_nowait()
@@ -951,27 +862,16 @@ def gui(smoke_output=None):
             elif kind == 'devices':
                 combo['values'] = value
                 device.set(next((x for x in value if x.startswith('emulator-')), value[0] if value else ''))
-            elif kind == 'origin':
-                serial, lat, lon, source = value
-                if device.get() == serial:
-                    fields['lat'].set(f'{lat:.8f}')
-                    fields['lon'].set(f'{lon:.8f}')
-                    samples.clear()
-                    paint()
-                    progress.set(f'已读取起点：{lat:.6f}, {lon:.6f}；请准备起点。')
-                    log(source)
-            elif kind == 'ready':
-                try:
-                    current = signature(selected(), config())
-                except (ValueError, RuntimeError):
-                    current = None
-                if value == current:
-                    prepared = value
-                    ready_text.set('系统起点已准备；开始前确认应用地图')
-                    progress.set('请在安小信开始新的测试，再启动环形定位。')
-            elif kind == 'invalid':
-                invalidate_origin()
+            elif kind == 'test_reset':
+                samples.clear()
+                fields['lat'].set('')
+                fields['lon'].set('')
+                progress.set('自动读取起点并进入运动页面……')
+                paint()
             elif kind == 'sample':
+                if not samples:
+                    fields['lat'].set(f"{value['lat']:.8f}")
+                    fields['lon'].set(f"{value['lon']:.8f}")
                 samples.append(value)
                 progress.set(f"已发送 {value['elapsed']:.1f} 秒 / {value['distance']:.1f} 米 · {value['lat']:.6f}, {value['lon']:.6f}")
                 paint()
@@ -1034,6 +934,13 @@ def gui(smoke_output=None):
             result['disable_button_visible'] = bool(disable_button.winfo_viewable())
             result['disable_button_always_available'] = disable_button not in controls
             result['headless_default'] = headless_var.get()
+            notebook.select(frame)
+            app.update_idletasks()
+            result['test_start_button_visible'] = bool(test_start_button.winfo_viewable())
+            entry_vars = [str(widget.cget('textvariable')) for group in form.winfo_children()
+                          for widget in group.winfo_children() if isinstance(widget, ttk.Entry)]
+            result['test_parameter_keys'] = [key for key, variable in fields.items() if str(variable) in entry_vars]
+            result['manual_gps_entries'] = any(str(fields[key]) in entry_vars for key in ('lat', 'lon'))
             notebook.select(settings_page)
             app.update_idletasks()
             result['shortcut_buttons'] = [b.cget('text') for b in shortcut_row.winfo_children()]

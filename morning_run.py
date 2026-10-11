@@ -66,7 +66,7 @@ def window(config, when):
     return start, end
 
 
-def validate(config):
+def validate(config, *, auto_origin=False):
     window(config, now())
     if not isinstance(config.get('headless', False), bool):
         raise ValueError('headless 必须为 true 或 false。')
@@ -75,9 +75,10 @@ def validate(config):
         value = float(config[key])
         if not math.isfinite(value) or not low <= value <= high:
             raise ValueError(f'{key} 无效。')
-    lat, lon = config['anchor_wgs84']
-    if not math.isfinite(lat + lon) or not (-85 <= lat <= 85 and -180 <= lon <= 180):
-        raise ValueError('起点区域坐标无效。')
+    if not auto_origin:
+        lat, lon = config['anchor_wgs84']
+        if not math.isfinite(lat + lon) or not (-85 <= lat <= 85 and -180 <= lon <= 180):
+            raise ValueError('起点区域坐标无效。')
     return config
 
 
@@ -203,7 +204,7 @@ class Runner:
             raise RuntimeError('自动操作仅校验过安小信 2.0.5 的 x86 安装；请使用电脑版安装按钮安装原 APK。')
         if self.call(['shell', 'settings', 'get', 'secure', 'location_mode']).strip() == '0':
             raise RuntimeError('模拟器系统定位已关闭。')
-        if SPORT in self.activity():
+        if SPORT in self.activity() or SPORT in self.call(['shell', 'dumpsys', 'activity', 'activities']):
             raise RuntimeError('安小信已有打开的跑步记录，先手动结束；脚本不会接管旧记录。')
         location = self.call(['shell', 'dumpsys', 'location'])
         if re.search(r'(?:gps|network) provider \[mock\]', location):
@@ -211,8 +212,14 @@ class Runner:
         try:
             origin = current_location(self.serial)
         except RuntimeError:
+            if self.c.get('auto_origin'):
+                self.log('当前 GPS 尚不可读；进入运动页后自动读取，不使用默认坐标。')
+                return None
             origin = tuple(self.c['anchor_wgs84'])
             self.log('模拟器尚无 GPS，计划在新记录开始前静止准备已确认的区域起点。')
+        if self.c.get('auto_origin'):
+            self.log('已自动读取模拟器当前起点。')
+            return origin
         gap = distance_meters(origin, self.c['anchor_wgs84'])
         if gap > self.c['max_origin_gap_m']:
             raise RuntimeError(f'当前起点距已确认区域 {gap:.0f} 米，取消自动运行。请先确认模拟器位置。')
@@ -243,9 +250,13 @@ class Runner:
 
     def navigate_to_start(self):
         self.call(['shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'])
-        launched = self.call(['shell', 'am', 'start', '-n', PACKAGE + '/.activity.SplashActivity'])
-        if re.search(r'Error:|Permission Denial', launched):
-            raise RuntimeError('无法打开安小信：' + launched)
+        activity = self.activity()
+        if SPORT in activity or SPORT in self.call(['shell', 'dumpsys', 'activity', 'activities']):
+            raise RuntimeError('安小信已有打开的跑步记录；脚本不会接管旧记录。')
+        if not any(page in activity for page in ('HomeActivity', 'WebActivity', 'LoginActivity')):
+            launched = self.call(['shell', 'am', 'start', '-n', PACKAGE + '/.activity.SplashActivity'])
+            if re.search(r'Error:|Permission Denial', launched):
+                raise RuntimeError('无法打开安小信：' + launched)
         until = time.monotonic() + 90
         backed = False
         login_attempted = False
@@ -300,6 +311,19 @@ class Runner:
             raise RuntimeError('用户停止了任务。')
         raise RuntimeError('无法识别跑步入口。请先把安小信停留在“开始运动”页面。')
 
+    def read_auto_origin(self):
+        until = time.monotonic() + 25
+        while time.monotonic() < until and not STOP.is_set():
+            try:
+                origin = current_location(self.serial)
+                if not (-85 <= origin[0] <= 85 and -180 <= origin[1] <= 180):
+                    raise RuntimeError('起点超出可用范围。')
+                self.log('已自动取得当前 GPS 起点。')
+                return origin
+            except RuntimeError:
+                STOP.wait(1)
+        raise RuntimeError('用户停止了任务。' if STOP.is_set() else '未取得有效系统 GPS，请检查安小信定位权限后重试。')
+
     def prepare(self, origin):
         self.last_position = origin
         until = time.monotonic() + 15
@@ -315,7 +339,8 @@ class Runner:
         else:
             if distance_meters(position, origin) > 15:
                 raise RuntimeError('静止准备后 GPS 未对齐起点。')
-        self.log('起点准备完成；尚未点击开始运动。')
+        self.log('起点准备完成；运动页已开启，接下来发送轨迹。' if self.started
+                 else '起点准备完成；尚未点击开始运动。')
 
     def start(self):
         items = self.ui()
@@ -438,12 +463,16 @@ class Runner:
                         raise failure[0]
                     elapsed = time.monotonic() - started
                     distance = elapsed * self.c['speed_kmh'] / 3.6
-                    lat, lon, _, _ = circle_position(*origin, self.c['radius_m'], distance)
+                    lat, lon, east, north = circle_position(*origin, self.c['radius_m'], distance)
                     self.last_position = lat, lon
                     send_location(self.serial, lat, lon, self.c['speed_kmh'])
                     track.write(json.dumps({'time': now().isoformat(), 'elapsed': elapsed,
                                             'distance': distance, 'lat': lat, 'lon': lon}, ensure_ascii=False) + '\n')
                     track.flush()
+                    if self.c.get('auto_origin'):
+                        print('@virtualrun:' + json.dumps({'elapsed': elapsed, 'distance': distance,
+                              'lat': lat, 'lon': lon, 'east': east, 'north': north,
+                              'radius': self.c['radius_m']}, ensure_ascii=False), flush=True)
                     STOP.wait(min(1, max(0, (end - now()).total_seconds())))
         finally:
             finished.set()
@@ -468,6 +497,19 @@ def execute_session(runner, state_path, state, *, start=None, end=None, trial_se
         runner.select_emulator(start=True)
         origin = runner.preflight()
         runner.navigate_to_start()
+        early_start = runner.c.get('auto_origin') is True and origin is None
+        if early_start:
+            # Starting the native page may be what activates its GPS listener.
+            # No coordinates are injected until a real emulator fix is read.
+            runner.start()
+            state.update(start_confirmed=True, started_at=now().isoformat())
+            save()
+            origin = runner.read_auto_origin()
+        elif runner.c.get('auto_origin') is True:
+            # Read again after navigation; use the freshest fix available.
+            origin = runner.read_auto_origin()
+        if runner.c.get('auto_origin') is True:
+            state['origin_wgs84'] = origin
         runner.prepare(origin)
         if start is not None:
             runner.log('起点准备完成，等待当天 07:00。')
@@ -477,8 +519,10 @@ def execute_session(runner, state_path, state, *, start=None, end=None, trial_se
                 raise RuntimeError('准备超时，取消迟到的晨跑。')
         if STOP.is_set():
             raise RuntimeError('用户取消。')
-        runner.start()
-        state.update(status='running', start_confirmed=True, started_at=now().isoformat())
+        if not early_start:
+            runner.start()
+        state.update(status='running', start_confirmed=True)
+        state.setdefault('started_at', now().isoformat())
         if trial_seconds is not None:
             end = now() + timedelta(seconds=trial_seconds)
         save()
@@ -516,17 +560,22 @@ def main(argv=None):
     modes.add_argument('--check', action='store_true', help='只读检查，不点击按钮或发送位置')
     modes.add_argument('--scheduled', action='store_true', help='由每日计划任务调用')
     modes.add_argument('--trial-seconds', type=int, help='立即短时试跑 1–300 秒，不影响当天定时状态')
+    modes.add_argument('--test-seconds', type=int, help='自动读取起点并测试 1–3600 秒，不修改每日任务')
     parser.add_argument('--stop-file', help='界面使用的停止请求文件；结束自己创建的记录后退出')
     args = parser.parse_args(argv)
     if args.trial_seconds is not None and not 1 <= args.trial_seconds <= 300:
         parser.error('试跑时长为 1–300 秒。')
+    if args.test_seconds is not None and not 1 <= args.test_seconds <= 3600:
+        parser.error('测试时长为 1–3600 秒。')
     STOP.clear()
     path = Path(args.config).resolve()
-    config = validate(json.loads(path.read_text(encoding='utf-8-sig')))
+    config = json.loads(path.read_text(encoding='utf-8-sig'))
+    config['auto_origin'] = args.test_seconds is not None
+    config = validate(config, auto_origin=config['auto_origin'])
     ADB_PATH = str(Path(config['sdk']) / 'platform-tools/adb.exe')
     os.environ['ANDROID_HOME'] = config['sdk']
     os.environ['ANDROID_SDK_ROOT'] = config['sdk']
-    directory = path.parent / 'logs' / now().strftime('%Y-%m-%d_%H%M%S')
+    directory = path.parent / 'logs' / now().strftime('%Y-%m-%d_%H%M%S_%f')
     runner = Runner(config, directory)
     from stop_support import StopWatcher, disabled
     if not args.check and disabled(path.parent):
@@ -575,8 +624,11 @@ def run_mode(args, path, config, directory, runner):
                  'speed_kmh': config['speed_kmh'], 'radius_m': config['radius_m']}
         if args.scheduled:
             return execute_session(runner, state_path, state, start=start, end=end)
-        state['trial_seconds'] = args.trial_seconds
-        return execute_session(runner, state_path, state, trial_seconds=args.trial_seconds)
+        test_seconds = getattr(args, 'test_seconds', None)
+        seconds = test_seconds if test_seconds is not None else args.trial_seconds
+        state['trial_seconds'] = seconds
+        state['auto_origin'] = config.get('auto_origin', False)
+        return execute_session(runner, state_path, state, trial_seconds=seconds)
 
 
 if __name__ == '__main__':
