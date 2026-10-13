@@ -25,6 +25,11 @@ PACKAGE = 'cn.edu.aiit.axx'
 SPORT = 'SportMapActivity'
 STOP = threading.Event()
 ADB_PATH = None
+MAX_PREPARATION_ATTEMPTS = 3
+
+
+class NavigationTimeout(RuntimeError):
+    """The start page did not load; no run-start action was performed."""
 
 
 def adb(args, serial=None, timeout=20):
@@ -125,6 +130,7 @@ class Runner:
         self.serial = None
         self.started = False
         self.last_position = None
+        self.login_refresh_attempted = False
         self.lock = threading.Lock()
 
     def log(self, message):
@@ -248,7 +254,7 @@ class Runner:
                 mutex.seek(0)
                 msvcrt.locking(mutex.fileno(), msvcrt.LK_UNLCK, 1)
 
-    def navigate_to_start(self):
+    def navigate_to_start(self, deadline=None):
         self.call(['shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'])
         activity = self.activity()
         if SPORT in activity or SPORT in self.call(['shell', 'dumpsys', 'activity', 'activities']):
@@ -257,19 +263,34 @@ class Runner:
             launched = self.call(['shell', 'am', 'start', '-n', PACKAGE + '/.activity.SplashActivity'])
             if re.search(r'Error:|Permission Denial', launched):
                 raise RuntimeError('无法打开安小信：' + launched)
-        until = time.monotonic() + 90
+        began = time.monotonic()
+        until = began + 90
+        hard_until = began + 180
+        if deadline is not None:
+            hard_until = min(hard_until, began + max(0, (deadline - now()).total_seconds()))
+            until = min(until, hard_until)
         backed = False
         login_attempted = False
         attempts = {}
-        def tap_entry(node, label):
-            key = (label, node.get('bounds'))
-            attempts[key] = attempts.get(key, 0) + 1
-            if attempts[key] > 2:
-                raise RuntimeError(f'点击“{label}”后页面未变化，已停止重复点击；请检查模拟器页面和网络。')
+        restarted = False
+        first_home_tap = None
+        def tap_entry(node, label, alternate=None):
+            count, last = attempts.get(label, (0, float('-inf')))
+            if count >= 2 or time.monotonic() - last < 20:
+                return False
+            attempts[label] = (count + 1, time.monotonic())
             self.log('打开入口：' + label)
-            self.tap(node)
+            # A second attempt touches the label within the same identified
+            # control, rather than repeatedly targeting its image/blank area.
+            self.tap(alternate if count and alternate is not None else node)
+            return True
         while time.monotonic() < until and not STOP.is_set():
-            items = self.ui()
+            try:
+                items = self.ui()
+            except (subprocess.TimeoutExpired, ET.ParseError):
+                self.log('读取页面暂时超时，等待界面恢复。')
+                STOP.wait(2)
+                continue
             if is_login_form(items):
                 if login_attempted or not self.c.get('auto_login'):
                     raise RuntimeError('需要登录安小信。请在软件“晨跑与登录”中填写账号密码，或在模拟器中手动登录。')
@@ -277,15 +298,21 @@ class Runner:
                 login_attempted = True
                 login(self, credentials['account'], credentials['password'], STOP)
                 del credentials
-                until = time.monotonic() + 90
+                # Login may consume most of the initial page budget. Give
+                # the authenticated page time to load without overrunning
+                # the daily start deadline or this call's hard time limit.
+                until = min(hard_until, max(until, time.monotonic() + 90))
                 continue
             if is_abnormal(items):
                 raise RuntimeError('安小信已显示定位异常。')
             if find(items, text='开始运动') is not None:
                 return
+            if find(items, rid='sport_run_ll_ll') is not None:
+                raise RuntimeError('检测到已有跑步记录；脚本不会接管旧记录。')
             entry = find(items, text='随性跑步')
             if entry is not None:
-                tap_entry(clickable_entry(items, '随性跑步') or entry, '随性跑步')
+                parent = clickable_entry(items, '随性跑步')
+                tap_entry(parent if parent is not None else entry, '随性跑步', entry)
             elif find(items, text='智慧运动') is not None:
                 # Known WebActivity header; inspect the actual hierarchy, no
                 # fixed screen coordinates or fallback into an unknown page.
@@ -293,23 +320,46 @@ class Runner:
                     header = find(items, text='智慧运动')
                     _, y = center(header)
                     width = max(int(re.findall(r'\d+', n.get('bounds', '[0,0][0,0]'))[2]) for n in items)
-                    self.call(['shell', 'input', 'tap', str(round(width * .94)), str(y)])
+                    menu = ET.Element('node', bounds=f'[{round(width * .90)},{y - 8}][{width},{y + 8}]')
+                    tap_entry(menu, '跑步菜单')
                 else:
                     entry = clickable_entry(items, '智慧运动')
                     if entry is not None:
-                        tap_entry(entry, '智慧运动')
+                        if tap_entry(entry, '智慧运动', find(items, text='智慧运动')) and first_home_tap is None:
+                            first_home_tap = time.monotonic()
+                        if first_home_tap is not None and time.monotonic() - first_home_tap >= 40 and not restarted:
+                            # Recover an old homepage through the original app
+                            # entrance, retaining its normal login/session flow.
+                            activity = self.activity()
+                            if 'HomeActivity' in activity:
+                                if SPORT in self.call(['shell', 'dumpsys', 'activity', 'activities']):
+                                    raise RuntimeError('检测到已有跑步记录；取消入口恢复。')
+                                refresh_login = self.c.get('auto_login') and not self.login_refresh_attempted and not login_attempted
+                                page = 'LoginActivity' if refresh_login else 'SplashActivity'
+                                if refresh_login:
+                                    # Use the original, exported login form. The
+                                    # saved opt-in is required; submit only once.
+                                    self.login_refresh_attempted = True
+                                    self.log('首页入口长期无响应，按已保存的自动登录设置恢复登录一次。')
+                                else:
+                                    self.log('首页入口等待后仍未跳转，重新打开安小信入口一次。')
+                                result = self.call(['shell', 'am', 'start', '-n', PACKAGE + '/.activity.' + page])
+                                if re.search(r'Error:|Permission Denial', result):
+                                    raise RuntimeError('无法恢复安小信入口。')
+                                restarted = True
+                                attempts.pop('智慧运动', None)
                     else:
                         # A WebActivity title is not a navigation button.
                         if not attempts.get('loading'):
                             self.log('智慧运动页面正在加载，等待跑步入口；不点击页面标题。')
-                            attempts['loading'] = 1
+                            attempts['loading'] = (1, time.monotonic())
             elif find(items, text='结束运动') is not None and not backed:
                 self.call(['shell', 'input', 'keyevent', 'KEYCODE_BACK'])
                 backed = True
             STOP.wait(1)
         if STOP.is_set():
             raise RuntimeError('用户停止了任务。')
-        raise RuntimeError('无法识别跑步入口。请先把安小信停留在“开始运动”页面。')
+        raise NavigationTimeout('等待跑步入口超时；未点击开始运动。请检查登录状态、服务入口或网络。')
 
     def read_auto_origin(self):
         until = time.monotonic() + 25
@@ -482,6 +532,52 @@ class Runner:
             thread.join(timeout=40)
 
 
+def retryable_daily_state(state):
+    """Only a known navigation failure before any start click may be retried."""
+    if state.get('status') != 'failed' or any(state.get(key) for key in ('start_attempted', 'start_confirmed', 'started_at')):
+        return False
+    if int(state.get('preparation_attempts', 0)) >= MAX_PREPARATION_ATTEMPTS:
+        return False
+    if state.get('retryable_before_start') is True:
+        return True
+    # Migrate the specific pre-start failure written by 1.4.4; never infer
+    # safety merely from a missing confirmation field in older state files.
+    error = state.get('error', '')
+    return error.startswith('点击“智慧运动”后页面未变化') or error.startswith('无法识别跑步入口。')
+
+
+def prepare_navigation(runner, state, save, start=None):
+    """Retry navigation under the shared lock, before any location/start action."""
+    deadline = start + timedelta(seconds=60) if start is not None else None
+    maximum = MAX_PREPARATION_ATTEMPTS if start is not None else 1
+    while True:
+        if STOP.is_set():
+            raise RuntimeError('用户取消。')
+        if deadline is not None and now() >= deadline:
+            raise NavigationTimeout('准备窗口已结束；未开始记录，不补跑。')
+        state['preparation_attempts'] = int(state.get('preparation_attempts', 0)) + 1
+        state['retryable_before_start'] = False
+        save()
+        runner.select_emulator(start=True)
+        origin = runner.preflight()
+        try:
+            if deadline is None:
+                runner.navigate_to_start()
+            else:
+                runner.navigate_to_start(deadline=deadline)
+            return origin
+        except NavigationTimeout as exc:
+            if runner.started or state.get('start_attempted') or state['preparation_attempts'] >= maximum:
+                raise
+            if STOP.is_set() or (deadline is not None and now() + timedelta(seconds=10) >= deadline):
+                raise
+            state.setdefault('preparation_errors', []).append(str(exc))
+            state['retryable_before_start'] = True
+            save()
+            runner.log(f'入口尚未就绪，10 秒后重试准备（{state["preparation_attempts"]}/{maximum}）；尚未创建记录。')
+            STOP.wait(10)
+
+
 def execute_session(runner, state_path, state, *, start=None, end=None, trial_seconds=None):
     """Use the same preparation, UI start, route and cleanup for both modes."""
     def save():
@@ -490,17 +586,18 @@ def execute_session(runner, state_path, state, *, start=None, end=None, trial_se
         temporary.replace(state_path)
 
     state.update(start_confirmed=False, finish_confirmed=False)
+    state.setdefault('start_attempted', False)
     save()
     awake = ctypes.windll.kernel32
     awake.SetThreadExecutionState(0x80000003)
     try:
-        runner.select_emulator(start=True)
-        origin = runner.preflight()
-        runner.navigate_to_start()
+        origin = prepare_navigation(runner, state, save, start)
         early_start = runner.c.get('auto_origin') is True and origin is None
         if early_start:
             # Starting the native page may be what activates its GPS listener.
             # No coordinates are injected until a real emulator fix is read.
+            state['start_attempted'] = True
+            save()
             runner.start()
             state.update(start_confirmed=True, started_at=now().isoformat())
             save()
@@ -520,6 +617,10 @@ def execute_session(runner, state_path, state, *, start=None, end=None, trial_se
         if STOP.is_set():
             raise RuntimeError('用户取消。')
         if not early_start:
+            # Persist intent before the tap: a crash or an unconfirmed start
+            # must never make this day's record eligible for another start.
+            state['start_attempted'] = True
+            save()
             runner.start()
         state.update(status='running', start_confirmed=True)
         state.setdefault('started_at', now().isoformat())
@@ -530,6 +631,8 @@ def execute_session(runner, state_path, state, *, start=None, end=None, trial_se
         state['status'] = 'cancelled' if STOP.is_set() else 'finished'
     except Exception as exc:
         state['status'], state['error'] = ('cancelled' if STOP.is_set() else 'failed'), str(exc)
+        state['retryable_before_start'] = (isinstance(exc, NavigationTimeout) and not STOP.is_set()
+                                         and not state['start_attempted'] and not runner.started)
         runner.log(f'{"任务已取消" if STOP.is_set() else "任务失败"}：{exc}')
     finally:
         if runner.last_position:
@@ -561,6 +664,7 @@ def main(argv=None):
     modes.add_argument('--scheduled', action='store_true', help='由每日计划任务调用')
     modes.add_argument('--trial-seconds', type=int, help='立即短时试跑 1–300 秒，不影响当天定时状态')
     modes.add_argument('--test-seconds', type=int, help='自动读取起点并测试 1–3600 秒，不修改每日任务')
+    modes.add_argument('--navigate-only', action='store_true', help='仅验证进入开始运动页，不开始记录、不发送位置')
     parser.add_argument('--stop-file', help='界面使用的停止请求文件；结束自己创建的记录后退出')
     args = parser.parse_args(argv)
     if args.trial_seconds is not None and not 1 <= args.trial_seconds <= 300:
@@ -570,7 +674,7 @@ def main(argv=None):
     STOP.clear()
     path = Path(args.config).resolve()
     config = json.loads(path.read_text(encoding='utf-8-sig'))
-    config['auto_origin'] = args.test_seconds is not None
+    config['auto_origin'] = args.test_seconds is not None or args.navigate_only
     config = validate(config, auto_origin=config['auto_origin'])
     ADB_PATH = str(Path(config['sdk']) / 'platform-tools/adb.exe')
     os.environ['ANDROID_HOME'] = config['sdk']
@@ -616,10 +720,28 @@ def run_mode(args, path, config, directory, runner):
             return 0
         state = json.loads(state_path.read_text(encoding='utf-8')) if args.scheduled and state_path.exists() else {}
         day = start.date().isoformat()
+        if getattr(args, 'navigate_only', False):
+            try:
+                runner.select_emulator(start=True)
+                runner.preflight()
+                runner.navigate_to_start()
+                runner.log('导航验证通过：已进入开始运动页；未开始记录、未发送位置。')
+                return 0
+            except Exception as exc:
+                runner.log('导航验证失败：' + str(exc))
+                return 1
+            finally:
+                runner.capture()
         if args.scheduled and state.get('date') == day:
-            runner.log('今天已有任务尝试，避免重复记录；详情见 daily-state.json。')
-            return 0
-        state = {'date': day, 'mode': 'scheduled' if args.scheduled else 'trial',
+            if not retryable_daily_state(state):
+                runner.log('今天已尝试开始、被取消或达到准备次数上限，避免重复记录；详情见 daily-state.json。')
+                return 0
+            runner.log('今天之前仅入口准备失败，允许在启动窗口内继续有限准备。')
+            state.setdefault('preparation_errors', []).append(state.pop('error', '入口准备失败'))
+            state.pop('completed_at', None)
+            state.update(status='preparing', log_directory=str(directory))
+        else:
+            state = {'date': day, 'mode': 'scheduled' if args.scheduled else 'trial',
                  'status': 'preparing', 'log_directory': str(directory),
                  'speed_kmh': config['speed_kmh'], 'radius_m': config['radius_m']}
         if args.scheduled:

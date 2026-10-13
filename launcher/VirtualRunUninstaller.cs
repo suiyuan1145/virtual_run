@@ -11,8 +11,8 @@ using System.Web.Script.Serialization;
 using Microsoft.Win32;
 
 [assembly: AssemblyTitle("卸载虚拟跑步")]
-[assembly: AssemblyVersion("1.4.4.0")]
-[assembly: AssemblyFileVersion("1.4.4.0")]
+[assembly: AssemblyVersion("1.4.5.0")]
+[assembly: AssemblyFileVersion("1.4.5.0")]
 
 internal static class VirtualRunUninstaller
 {

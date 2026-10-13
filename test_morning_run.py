@@ -28,8 +28,9 @@ class MorningTests(unittest.TestCase):
                         '<node text="智慧运动" clickable="false" bounds="[0,250][200,300]" />'
                         '</node></hierarchy>')
         with patch.object(self.r, 'ui', return_value=items), patch.object(self.r, 'call', return_value='Starting'), \
-             patch.object(self.r, 'tap') as tap, patch.object(m.STOP, 'wait', return_value=False):
-            with self.assertRaisesRegex(RuntimeError, '停止重复点击'):
+             patch.object(self.r, 'tap') as tap, patch.object(m.STOP, 'wait', return_value=False), \
+             patch.object(m.time, 'monotonic', side_effect=range(0, 300, 2)):
+            with self.assertRaises(m.NavigationTimeout):
                 self.r.navigate_to_start()
         self.assertEqual(tap.call_count, 2)
 

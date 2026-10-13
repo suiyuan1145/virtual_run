@@ -1,6 +1,6 @@
 # 虚拟跑步 / Virtual Run
 
-Windows 桌面路线模拟与 Android 定位测试工具，桌面版本为 **1.4.4**。通过官方 Android Emulator 和 ADB 操作测试界面，支持路线预览、起点准备、登录、短时试跑、每日定时任务与一键停用。仓库同时包含独立 Android 模拟位置应用源码。
+Windows 桌面路线模拟与 Android 定位测试工具，桌面版本为 **1.4.5**。通过官方 Android Emulator 和 ADB 操作测试界面，支持路线预览、起点准备、登录、短时试跑、每日定时任务与一键停用。仓库同时包含独立 Android 模拟位置应用源码。
 
 本仓库发布本项目源码，**不包含安小信 APK、反编译代码、账号、运行日志、Android SDK、系统镜像或安装包**。安小信是独立第三方应用，不受本项目 MIT 许可证覆盖；需要自行取得有权使用的安装包。此工具适用于有授权的定位与界面测试，请遵守目标服务的规则，不将模拟轨迹冒充真实运动记录。
 
@@ -61,7 +61,7 @@ $env:ANDROID_SDK_ROOT = 'C:\Android\Sdk'
 python build_windows.py
 ```
 
-产物为 `dist/虚拟跑步-1.4.4-Windows.exe` 和完整 ZIP，包含本地 Python、ADB、说明、快捷方式与卸载器。仓库不提供预编译安装包。图标已提供；仅重新生成图标时需要 Pillow。
+产物为 `dist/虚拟跑步-1.4.5-Windows.exe` 和完整 ZIP，包含本地 Python、ADB、说明、快捷方式与卸载器。仓库不提供预编译安装包。图标已提供；仅重新生成图标时需要 Pillow。
 
 ## Android 源码
 
@@ -99,3 +99,9 @@ python -m unittest discover -s . -p 'test_*.py' -v
 ## 许可证
 
 本项目自编写源码使用 [MIT License](LICENSE)。坐标转换公式等第三方内容保留各自许可，见 [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) 和 `licenses/`。Android SDK、Python 运行时与安小信等独立第三方组件不因本项目开源而改用 MIT 许可证。
+
+## 1.4.5 晨跑入口恢复
+
+晨跑不依赖事先进行 60 秒试跑。首页入口会等待加载，并在已启用自动登录时恢复登录一次。仅未尝试开始的导航超时可在当天启动窗口内有限重试，最多准备三次；开始意图在点击前保存，防止确认失败后创建重复记录。已有记录和用户取消仍会阻止自动开始，07:01 后不补跑。
+
+可用 `python morning_run.py --config 个人晨跑配置.json --navigate-only` 验证导航。该模式只进入开始运动页，不点击开始、不发送定位，不修改每日状态；与晨跑共用互斥锁。
