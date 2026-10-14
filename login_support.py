@@ -133,13 +133,26 @@ def login(runner, account, password, stop):
 
 def authenticated_page(items, activity):
     return 'cn.edu.aiit.axx/.activity.HomeActivity' in activity or any(
-        n.get('text') in ('智慧运动', '随性跑步', '开始运动') for n in items)
+        n.get('text') in ('智慧运动', '随性跑步', '开始运动') for n in items) or (
+        'cn.edu.aiit.axx/.activity.WebActivity' in activity and
+        any(n.get('text') in ('结束运动', '课外锻炼进度') for n in items))
 
 
 def open_and_login(runner, account, password, stop):
     validate_credentials(account, password)
-    if 'SportMapActivity' in runner.activity():
+    activity = runner.activity()
+    if 'SportMapActivity' in activity or 'SportMapActivity' in runner.call(['shell', 'dumpsys', 'activity', 'activities']):
         raise RuntimeError('当前存在跑步记录，请先结束记录再登录。')
+    # Reuse known existing pages, including the completed-run WebView. Opening
+    # Splash first could return to that same page and then wait for a nonexistent
+    # password form. This recognizes UI state, not server token validity.
+    items = runner.ui()
+    if is_login_form(items):
+        login(runner, account, password, stop)
+        return
+    if authenticated_page(items, activity):
+        runner.log('安小信已处于登录后的页面，本次无需重复提交。')
+        return
     runner.call(['shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'])
     result = runner.call(['shell', 'am', 'start', '-n', PACKAGE + '/.activity.SplashActivity'])
     if 'Error:' in result or 'Permission Denial' in result:
@@ -154,4 +167,4 @@ def open_and_login(runner, account, password, stop):
             runner.log('安小信已登录，无需重复提交。')
             return
         stop.wait(1)
-    raise RuntimeError('未找到账号密码登录页，请在模拟器中检查权限或其他提示。')
+    raise RuntimeError('未找到账号密码登录页。请点击“查看后台画面”检查权限或其他提示；需要手动操作时切换窗口模式。')

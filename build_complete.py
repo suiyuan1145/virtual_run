@@ -28,7 +28,7 @@ def main():
                     ignore=shutil.ignore_patterns('site-packages', '__pycache__', 'test', 'tests', 'ensurepip', 'idlelib'))
     shutil.copytree(python_home / 'tcl', runtime / 'tcl', dirs_exist_ok=True)
     for name in ('android_location_test.py', 'desktop_support.py', 'location_tools.py',
-                 'android_setup.py', 'morning_run.py', 'morning_support.py', 'login_support.py', 'shortcut_support.py', 'uninstall_support.py', 'stop_support.py', 'click_run_test.py',
+                 'android_setup.py', 'morning_run.py', 'morning_support.py', 'login_support.py', 'emulator_preview.py', 'shortcut_support.py', 'uninstall_support.py', 'stop_support.py', 'click_run_test.py',
                  '测试自动点击跑步.cmd', '试跑晨跑60秒.cmd', 'README.md', 'LICENSE', 'THIRD_PARTY_LICENSES.txt'):
         shutil.copyfile(ROOT / name, OUT / name)
     for name in ('docs', 'assets', 'licenses'):

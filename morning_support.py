@@ -36,7 +36,7 @@ def configure(sdk, avd, lat, lon, speed=12, radius=150, auto_login=False, headle
 
 
 def copy_runtime_files(target):
-    for name in ('morning_run.py', 'android_location_test.py', 'desktop_support.py', 'location_tools.py', 'login_support.py', 'stop_support.py'):
+    for name in ('morning_run.py', 'android_location_test.py', 'desktop_support.py', 'location_tools.py', 'login_support.py', 'emulator_preview.py', 'stop_support.py'):
         shutil.copyfile(RESOURCE_DIR / name, target / name)
     for name in ('启动晨跑.ps1', '启用每日晨跑.ps1', '停用每日晨跑.ps1',
                  '启用每日晨跑.cmd', '停用每日晨跑.cmd', '检查晨跑环境.cmd',

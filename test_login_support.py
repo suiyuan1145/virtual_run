@@ -83,6 +83,25 @@ class LoginTests(unittest.TestCase):
         l.open_and_login(self.runner, 'user', 'Password123', self.stop)
         self.runner.tap.assert_not_called()
 
+    def test_completed_sport_page_is_reused_without_opening_splash_or_typing(self):
+        self.runner.activity.return_value = 'cn.edu.aiit.axx/.activity.WebActivity'
+        self.runner.ui.return_value = [node(text='结束运动'), node(text='公里')]
+        l.open_and_login(self.runner, 'user', 'Password123', self.stop)
+        self.runner.tap.assert_not_called()
+        self.assertFalse(any('am' in call.args[0] or 'input' in call.args[0] for call in self.runner.call.call_args_list))
+
+    def test_generic_web_page_is_not_treated_as_authenticated(self):
+        self.assertFalse(l.authenticated_page([node(text='请授予权限')], 'cn.edu.aiit.axx/.activity.WebActivity'))
+        self.assertFalse(l.authenticated_page([node(text='结束运动')], 'other.app/.activity.WebActivity'))
+
+    def test_record_in_background_blocks_login_before_navigation(self):
+        self.runner.activity.return_value = 'cn.edu.aiit.axx/.activity.WebActivity'
+        self.runner.call.return_value = 'SportMapActivity'
+        with self.assertRaisesRegex(RuntimeError, '先结束'):
+            l.open_and_login(self.runner, 'user', 'Password123', self.stop)
+        self.runner.ui.assert_not_called()
+        self.runner.tap.assert_not_called()
+
     def test_runner_redacts_saved_login_xml(self):
         with tempfile.TemporaryDirectory() as folder:
             runner = m.Runner({}, Path(folder))

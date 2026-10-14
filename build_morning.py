@@ -10,7 +10,7 @@ OUT = ROOT / 'dist/morning'
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     # This source-only package uses the user's installed Python interpreter.
-    for name in ('morning_run.py', 'morning_support.py', 'android_location_test.py', 'desktop_support.py', 'location_tools.py', 'login_support.py', 'stop_support.py'):
+    for name in ('morning_run.py', 'morning_support.py', 'android_location_test.py', 'desktop_support.py', 'location_tools.py', 'login_support.py', 'emulator_preview.py', 'stop_support.py'):
         shutil.copyfile(ROOT / name, OUT / name)
     for source in (ROOT / 'morning').iterdir():
         if source.is_file() and (source.suffix in ('.ps1', '.cmd', '.py') or source.name == '使用方法.md'):

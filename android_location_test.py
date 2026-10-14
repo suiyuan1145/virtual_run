@@ -511,9 +511,12 @@ def gui(smoke_output=None):
                 runner.select_emulator(start=True, stop_event=stop)
                 login_support.open_and_login(runner, *values[:2], stop)
                 events.put(('clear_password', None))
-                events.put(('login_status', '已确认安小信登录成功'))
+                events.put(('login_status', '已处于登录后的页面，操作详情见日志'))
             finally:
-                morning_run.ADB_PATH = original_adb
+                try:
+                    runner.capture()
+                finally:
+                    morning_run.ADB_PATH = original_adb
         work(task, 'morning_log')
 
     add_button(login_actions, '登录安小信', lambda: action(automatic_login))
@@ -568,6 +571,11 @@ def gui(smoke_output=None):
                 morning_run.ADB_PATH = original_adb
         work(task, 'morning_log')
     add_button(quick_help, '关闭模拟器', lambda: action(close_morning_emulator))
+    def preview_emulator():
+        from emulator_preview import show_preview
+        show_preview(app, Path(sdk_var.get().strip()) / 'platform-tools/adb.exe', avd_var.get().strip())
+    preview_button = ttk.Button(quick_help, text='查看后台画面', command=lambda: action(preview_emulator))
+    preview_button.pack(side='left', padx=3)
     ttk.Button(morning_form, text='从测试轨迹取起点', command=lambda: action(copy_origin)).grid(row=1, column=4, padx=6)
     morning_actions = ttk.Frame(morning_page)
     morning_actions.pack(fill='x')
@@ -934,6 +942,7 @@ def gui(smoke_output=None):
             result['disable_button_visible'] = bool(disable_button.winfo_viewable())
             result['disable_button_always_available'] = disable_button not in controls
             result['headless_default'] = headless_var.get()
+            result['preview_button_visible'] = bool(preview_button.winfo_viewable())
             notebook.select(frame)
             app.update_idletasks()
             result['test_start_button_visible'] = bool(test_start_button.winfo_viewable())
