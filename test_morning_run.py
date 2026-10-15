@@ -78,7 +78,7 @@ class MorningTests(unittest.TestCase):
         select.assert_called_once_with(start=False)
         self.assertEqual(call.call_args.args[0], ['emu', 'kill'])
         with patch.object(self.r, 'select_emulator'), \
-             patch.object(self.r, 'call', return_value='SportMapActivity') as call:
+             patch.object(self.r, 'call', return_value='mResumedActivity: ActivityRecord{abc u0 cn.edu.aiit.axx/.activity.SportMapActivity t67}') as call:
             with self.assertRaisesRegex(RuntimeError, '结束记录'):
                 self.r.close_emulator(Path(self.temp.name) / 'morning.lock')
         self.assertNotIn(unittest.mock.call(['emu', 'kill']), call.call_args_list)
@@ -107,7 +107,7 @@ class MorningTests(unittest.TestCase):
         package = 'versionName=2.0.5\nprimaryCpuAbi=x86\n'
         def shell(args, **kw):
             return package if 'package' in args else '3' if 'settings' in args else 'gps provider [mock]:'
-        with patch.object(self.r, 'call', side_effect=shell), patch.object(self.r, 'activity', return_value='SportMapActivity'):
+        with patch.object(self.r, 'call', side_effect=shell), patch.object(self.r, 'activity', return_value='mResumedActivity: ActivityRecord{abc u0 cn.edu.aiit.axx/.activity.SportMapActivity t67}'):
             with self.assertRaisesRegex(RuntimeError, '旧记录'):
                 self.r.preflight()
         with patch.object(self.r, 'call', side_effect=shell), patch.object(self.r, 'activity', return_value='WebActivity'):

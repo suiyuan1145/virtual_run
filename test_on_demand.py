@@ -55,7 +55,7 @@ class OnDemandTests(unittest.TestCase):
         runner = m.Runner(self.config, self.directory)
         runner.serial = 'emulator-5554'
         with patch.object(runner, 'activity', return_value='HomeActivity'), \
-                patch.object(runner, 'call', return_value='SportMapActivity'), \
+                patch.object(runner, 'call', return_value='mResumedActivity: ActivityRecord{abc u0 cn.edu.aiit.axx/.activity.SportMapActivity t67}'), \
                 patch.object(runner, 'tap') as tap:
             with self.assertRaisesRegex(RuntimeError, '旧记录'):
                 runner.navigate_to_start()

@@ -99,7 +99,7 @@ class CleanupTests(unittest.TestCase):
 
     def test_open_native_record_or_phone_blocks_force_stop(self):
         for serial, started, activity in [('emulator-5554', True, ''),
-                                          ('emulator-5554', False, 'background ' + m.SPORT),
+                                          ('emulator-5554', False, '* Hist #1: ActivityRecord{abc u0 cn.edu.aiit.axx/.activity.SportMapActivity t67}'),
                                           ('phone-123', False, '')]:
             with self.subTest(serial=serial, started=started, activity=activity):
                 runner = m.Runner({}, self.directory)
@@ -116,6 +116,15 @@ class CleanupTests(unittest.TestCase):
                          *['u0_a1 123 ' + m.PACKAGE + ':remote'] * 3]), patch.object(m.time, 'sleep'):
             with self.assertRaisesRegex(RuntimeError, '未确认关闭'):
                 runner.close_app()
+
+    def test_closed_record_history_does_not_block_app_shutdown(self):
+        runner = m.Runner({}, self.directory)
+        runner.serial = 'emulator-5554'
+        history = ('mResumedActivity: ActivityRecord{abc u0 cn.edu.aiit.axx/.activity.WebActivity t67}\n'
+                   'mLastPausedActivity: ActivityRecord{old u0 cn.edu.aiit.axx/.activity.SportMapActivity t-1 f}')
+        with patch.object(runner, 'call', side_effect=[history, '', 'USER PID NAME']) as adb:
+            runner.close_app()
+        self.assertIn(call(['shell', 'am', 'force-stop', m.PACKAGE]), adb.call_args_list)
 
 
 if __name__ == '__main__':

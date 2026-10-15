@@ -71,7 +71,7 @@ class LoginTests(unittest.TestCase):
         self.runner.serial = 'phone123'
         with self.assertRaisesRegex(RuntimeError, '官方 Android'):
             l.login(self.runner, 'user', 'Password123', self.stop)
-        self.runner.activity.return_value = 'SportMapActivity'
+        self.runner.activity.return_value = 'mResumedActivity: ActivityRecord{abc u0 cn.edu.aiit.axx/.activity.SportMapActivity t67}'
         with self.assertRaisesRegex(RuntimeError, '先结束'):
             l.open_and_login(self.runner, 'user', 'Password123', self.stop)
         for password in ('含中文', 'a b', 'literal%s'):
@@ -85,6 +85,8 @@ class LoginTests(unittest.TestCase):
 
     def test_completed_sport_page_is_reused_without_opening_splash_or_typing(self):
         self.runner.activity.return_value = 'cn.edu.aiit.axx/.activity.WebActivity'
+        self.runner.call.return_value = ('mResumedActivity: ActivityRecord{abc u0 cn.edu.aiit.axx/.activity.WebActivity t67}\n'
+                                         'mLastPausedActivity: ActivityRecord{old u0 cn.edu.aiit.axx/.activity.SportMapActivity t-1 f}')
         self.runner.ui.return_value = [node(text='结束运动'), node(text='公里')]
         l.open_and_login(self.runner, 'user', 'Password123', self.stop)
         self.runner.tap.assert_not_called()
@@ -96,7 +98,7 @@ class LoginTests(unittest.TestCase):
 
     def test_record_in_background_blocks_login_before_navigation(self):
         self.runner.activity.return_value = 'cn.edu.aiit.axx/.activity.WebActivity'
-        self.runner.call.return_value = 'SportMapActivity'
+        self.runner.call.return_value = '* Hist #1: ActivityRecord{abc u0 cn.edu.aiit.axx/.activity.SportMapActivity t67}'
         with self.assertRaisesRegex(RuntimeError, '先结束'):
             l.open_and_login(self.runner, 'user', 'Password123', self.stop)
         self.runner.ui.assert_not_called()

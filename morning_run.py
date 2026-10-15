@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 from android_location_test import circle_position, location_command, find_adb
 from location_tools import distance_meters, parse_gps_location
-from login_support import is_login_form, login, load_credentials
+from login_support import is_login_form, login, load_credentials, has_open_run_activity
 from desktop_support import emulator_launch
 
 BEIJING = timezone(timedelta(hours=8))
@@ -145,7 +145,8 @@ class Runner:
 
     def activity(self):
         output = self.call(['shell', 'dumpsys', 'activity', 'activities'])
-        return next((line for line in output.splitlines() if 'mResumedActivity' in line), '')
+        return next((line for line in output.splitlines() if re.search(
+            r'\b(?:mResumedActivity|mTopResumedActivity|topResumedActivity)\s*[:=]', line)), '')
 
     def ui(self):
         path = '/data/local/tmp/virtualrun-morning-ui.xml'
@@ -210,7 +211,7 @@ class Runner:
             raise RuntimeError('自动操作仅校验过安小信 2.0.5 的 x86 安装；请使用电脑版安装按钮安装原 APK。')
         if self.call(['shell', 'settings', 'get', 'secure', 'location_mode']).strip() == '0':
             raise RuntimeError('模拟器系统定位已关闭。')
-        if SPORT in self.activity() or SPORT in self.call(['shell', 'dumpsys', 'activity', 'activities']):
+        if has_open_run_activity(self.activity()) or has_open_run_activity(self.call(['shell', 'dumpsys', 'activity', 'activities'])):
             raise RuntimeError('安小信已有打开的跑步记录，先手动结束；脚本不会接管旧记录。')
         location = self.call(['shell', 'dumpsys', 'location'])
         if re.search(r'(?:gps|network) provider \[mock\]', location):
@@ -246,7 +247,7 @@ class Runner:
             try:
                 self.select_emulator(start=False)
                 activity = self.call(['shell', 'dumpsys', 'activity', 'activities'])
-                if SPORT in activity:
+                if has_open_run_activity(activity):
                     raise RuntimeError('安小信仍有打开的跑步页面，请先结束记录并返回首页。')
                 self.call(['emu', 'kill'])
                 self.log('已关闭指定模拟器；可选择窗口模式后重新启动。')
@@ -257,7 +258,7 @@ class Runner:
     def navigate_to_start(self, deadline=None):
         self.call(['shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'])
         activity = self.activity()
-        if SPORT in activity or SPORT in self.call(['shell', 'dumpsys', 'activity', 'activities']):
+        if has_open_run_activity(activity) or has_open_run_activity(self.call(['shell', 'dumpsys', 'activity', 'activities'])):
             raise RuntimeError('安小信已有打开的跑步记录；脚本不会接管旧记录。')
         if not any(page in activity for page in ('HomeActivity', 'WebActivity', 'LoginActivity')):
             launched = self.call(['shell', 'am', 'start', '-n', PACKAGE + '/.activity.SplashActivity'])
@@ -332,7 +333,7 @@ class Runner:
                             # entrance, retaining its normal login/session flow.
                             activity = self.activity()
                             if 'HomeActivity' in activity:
-                                if SPORT in self.call(['shell', 'dumpsys', 'activity', 'activities']):
+                                if has_open_run_activity(self.call(['shell', 'dumpsys', 'activity', 'activities'])):
                                     raise RuntimeError('检测到已有跑步记录；取消入口恢复。')
                                 refresh_login = self.c.get('auto_login') and not self.login_refresh_attempted and not login_attempted
                                 page = 'LoginActivity' if refresh_login else 'SplashActivity'
@@ -475,7 +476,7 @@ class Runner:
         """Close Anxiaoxin only after owned-record cleanup, keeping the AVD."""
         if not self.serial or not self.serial.startswith('emulator-'):
             raise RuntimeError('自动关闭仅适用于已连接的官方模拟器。')
-        if self.started or SPORT in self.call(['shell', 'dumpsys', 'activity', 'activities']):
+        if self.started or has_open_run_activity(self.call(['shell', 'dumpsys', 'activity', 'activities'])):
             raise RuntimeError('跑步页面仍打开，保留安小信供人工检查。')
         self.call(['shell', 'am', 'force-stop', PACKAGE])
         for attempt in range(3):

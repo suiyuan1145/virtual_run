@@ -12,6 +12,26 @@ import re
 PACKAGE = 'cn.edu.aiit.axx'
 
 
+def has_open_run_activity(activity_dump):
+    """Read live task entries, excluding Android's last-paused references."""
+    component = re.compile(r'(?<![\w.])' + re.escape(PACKAGE) + r'/(?:\.activity\.|' +
+                           re.escape(PACKAGE) + r'\.activity\.)SportMapActivity(?=\s|$)')
+    for line in activity_dump.splitlines():
+        line = line.strip()
+        if not (re.match(r'(?:mResumedActivity|mTopResumedActivity|topResumedActivity|ResumedActivity|Resumed)\s*[:=]', line)
+                or line.startswith('Activities=[')
+                or re.match(r'\*\s+(?:Hist\s+#\d+\s*:|ActivityRecord\{)', line)):
+            continue
+        for record in re.findall(r'ActivityRecord\{([^}]*)\}', line):
+            if not component.search(record):
+                continue
+            task = re.search(r'\bt(-?\d+)\b', record)
+            if (task and int(task.group(1)) < 0) or re.search(r'(?:^|\s)f(?:\s|$)', record):
+                continue
+            return True
+    return False
+
+
 class Blob(ctypes.Structure):
     _fields_ = [('size', wintypes.DWORD), ('data', ctypes.POINTER(ctypes.c_ubyte))]
 
@@ -141,7 +161,7 @@ def authenticated_page(items, activity):
 def open_and_login(runner, account, password, stop):
     validate_credentials(account, password)
     activity = runner.activity()
-    if 'SportMapActivity' in activity or 'SportMapActivity' in runner.call(['shell', 'dumpsys', 'activity', 'activities']):
+    if has_open_run_activity(activity) or has_open_run_activity(runner.call(['shell', 'dumpsys', 'activity', 'activities'])):
         raise RuntimeError('当前存在跑步记录，请先结束记录再登录。')
     # Reuse known existing pages, including the completed-run WebView. Opening
     # Splash first could return to that same page and then wait for a nonexistent
