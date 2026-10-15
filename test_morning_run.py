@@ -1,4 +1,5 @@
 import json
+import itertools
 from pathlib import Path
 import tempfile
 import unittest
@@ -120,7 +121,32 @@ class MorningTests(unittest.TestCase):
         with patch.object(self.r, 'ui', side_effect=steps), patch.object(self.r, 'tap') as tap, patch.object(m.time, 'sleep'):
             self.r.finish()
         self.assertFalse(self.r.started)
-        self.assertEqual(tap.call_args_list[1].kwargs, {'hold_ms': 4500})
+        self.assertEqual(tap.call_args_list[1].kwargs, {'hold_ms': 6000})
+
+    def test_completed_view_hold_moves_within_button_to_trigger_finish(self):
+        with patch.object(self.r, 'call') as adb:
+            self.r.tap(element(rid='sport_stop_ll_completedview'), hold_ms=6000)
+        self.assertEqual(adb.call_args.args[0], ['shell', 'input', 'swipe', '60', '70', '68', '70', '6000'])
+
+    def test_finish_retries_unresponsive_end_button_then_confirms(self):
+        paused = [element(rid='sport_stop_ll_completedview')]
+        self.r.started = True
+        with patch.object(self.r, 'ui', side_effect=[paused, paused, [element(text='结束运动')]]), \
+             patch.object(self.r, 'tap') as tap, patch.object(m.time, 'sleep'), \
+             patch.object(m.time, 'monotonic', side_effect=itertools.count(0, 5)):
+            self.r.finish()
+        self.assertEqual(tap.call_count, 2)
+        self.assertFalse(self.r.started)
+
+    def test_finish_never_repeats_end_hold_indefinitely(self):
+        self.r.started = True
+        with patch.object(self.r, 'ui', return_value=[element(rid='sport_stop_ll_completedview')]), \
+             patch.object(self.r, 'tap') as tap, patch.object(m.time, 'sleep'), \
+             patch.object(m.time, 'monotonic', side_effect=itertools.count(0, 5)):
+            with self.assertRaisesRegex(RuntimeError, '未确认'):
+                self.r.finish()
+        self.assertEqual(tap.call_count, 2)
+        self.assertTrue(self.r.started)
 
     def test_short_record_uses_end_text_not_continue_button(self):
         items = [element(text='本次运动时间或距离过短，无法保存记录，确认结束吗？'),

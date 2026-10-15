@@ -131,6 +131,7 @@ class Runner:
         self.started = False
         self.last_position = None
         self.login_refresh_attempted = False
+        self.anr_recovery_attempted = False
         self.lock = threading.Lock()
 
     def log(self, message):
@@ -166,7 +167,11 @@ class Runner:
         label = node.get('text') or node.get('resource-id') or '已识别控件'
         self.log(f'{"长按" if hold_ms else "点击"}：{label}')
         if hold_ms:
-            self.call(['shell', 'input', 'swipe', str(x), str(y), str(x), str(y), str(hold_ms)], timeout=15)
+            # CompletedView finishes on MOVE after its progress threshold;
+            # a same-point hold can be coalesced and UP only resets it.
+            bounds = list(map(int, re.findall(r'\d+', node.get('bounds', ''))))
+            end_x = min(x + 8, bounds[2] - 1)
+            self.call(['shell', 'input', 'swipe', str(x), str(y), str(end_x), str(y), str(hold_ms)], timeout=15)
         else:
             self.call(['shell', 'input', 'tap', str(x), str(y)])
 
@@ -291,6 +296,9 @@ class Runner:
             except (subprocess.TimeoutExpired, ET.ParseError):
                 self.log('读取页面暂时超时，等待界面恢复。')
                 STOP.wait(2)
+                continue
+            if self.recover_unresponsive_app(items):
+                until = min(hard_until, max(until, time.monotonic() + 90))
                 continue
             if is_login_form(items):
                 if login_attempted or not self.c.get('auto_login'):
@@ -425,6 +433,28 @@ class Runner:
             STOP.wait(1)
         raise RuntimeError('点击开始后未确认运动中界面。')
 
+    def recover_unresponsive_app(self, items):
+        """Recover the observed system ANR once, before any owned run starts."""
+        controls = {n.get('resource-id'): n for n in items if n.get('package') == 'android'}
+        title = controls.get('android:id/alertTitle')
+        if title is None or '安小信' not in title.get('text', '') or not all(
+                key in controls for key in ('android:id/aerr_close', 'android:id/aerr_wait')):
+            return False
+        if self.started or has_open_run_activity(self.call(['shell', 'dumpsys', 'activity', 'activities'])):
+            raise RuntimeError('安小信无响应且存在跑步记录，保留现场；不会重启应用。')
+        if self.anr_recovery_attempted:
+            raise NavigationTimeout('安小信再次无响应，本次停止自动恢复；未点击开始运动。')
+        self.anr_recovery_attempted = True
+        self.log('安小信出现系统无响应提示；尚未开始记录，关闭并重新打开一次。')
+        # The system's ANR dialog may outlive `am force-stop`. Dismiss its
+        # identified close button first so it cannot cover the new instance.
+        self.tap(controls['android:id/aerr_close'])
+        self.close_app()
+        result = self.call(['shell', 'am', 'start', '-n', PACKAGE + '/.activity.SplashActivity'])
+        if re.search(r'Error:|Permission Denial', result):
+            raise NavigationTimeout('无响应后无法重新打开安小信。')
+        return True
+
     def dismiss_battery_prompt(self, items):
         # This known Android first-run prompt covers the timer. Dismiss only
         # its negative button, without enabling a system battery exemption.
@@ -440,7 +470,8 @@ class Runner:
 
     def finish(self):
         until = time.monotonic() + 65
-        held = False
+        holds = 0
+        last_hold = float('-inf')
         closed_abnormal = False
         closed_short = False
         while time.monotonic() < until:
@@ -453,9 +484,11 @@ class Runner:
                 closed_abnormal = True
             elif find(items, rid='sport_run_ll_ll') is not None:
                 self.tap(find(items, rid='sport_run_ll_ll'))  # pause first
-            elif find(items, rid='sport_stop_ll_completedview') is not None and not held:
-                self.tap(find(items, rid='sport_stop_ll_completedview'), hold_ms=4500)
-                held = True
+            elif (find(items, rid='sport_stop_ll_completedview') is not None and holds < 2
+                  and time.monotonic() - last_hold >= 8):
+                self.tap(find(items, rid='sport_stop_ll_completedview'), hold_ms=6000)
+                holds += 1
+                last_hold = time.monotonic()
             elif find(items, text='结束') is not None and any('无法保存记录' in n.get('text', '') for n in items):
                 self.tap(find(items, text='结束'))
                 closed_short = True
