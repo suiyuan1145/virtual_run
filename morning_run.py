@@ -471,6 +471,23 @@ class Runner:
             time.sleep(1)
         raise RuntimeError('未确认安小信结束结果，请人工检查；任务不会记为成功。')
 
+    def close_app(self):
+        """Close Anxiaoxin only after owned-record cleanup, keeping the AVD."""
+        if not self.serial or not self.serial.startswith('emulator-'):
+            raise RuntimeError('自动关闭仅适用于已连接的官方模拟器。')
+        if self.started or SPORT in self.call(['shell', 'dumpsys', 'activity', 'activities']):
+            raise RuntimeError('跑步页面仍打开，保留安小信供人工检查。')
+        self.call(['shell', 'am', 'force-stop', PACKAGE])
+        for attempt in range(3):
+            processes = self.call(['shell', 'ps', '-A'])
+            if not any(line.split() and (line.split()[-1] == PACKAGE or
+                       line.split()[-1].startswith(PACKAGE + ':')) for line in processes.splitlines()):
+                self.log('已关闭安小信，模拟器继续保留。')
+                return
+            if attempt < 2:
+                time.sleep(1)
+        raise RuntimeError('安小信进程仍在运行，未确认关闭；模拟器已保留。')
+
     def capture(self):
         if not self.serial:
             return
@@ -585,7 +602,7 @@ def execute_session(runner, state_path, state, *, start=None, end=None, trial_se
         temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
         temporary.replace(state_path)
 
-    state.update(start_confirmed=False, finish_confirmed=False)
+    state.update(start_confirmed=False, finish_confirmed=False, app_closed=False)
     state.setdefault('start_attempted', False)
     save()
     awake = ctypes.windll.kernel32
@@ -648,6 +665,16 @@ def execute_session(runner, state_path, state, *, start=None, end=None, trial_se
                 state['status'], state['finish_error'] = 'failed', str(exc)
                 runner.log(f'结束未确认：{exc}')
         runner.capture()
+        # Preserve the result screen before closing; never close an existing
+        # record or hide a failed/unconfirmed finish from the user.
+        save()
+        if state['finish_confirmed']:
+            try:
+                runner.close_app()
+                state['app_closed'] = True
+            except Exception as exc:
+                state['status'], state['close_error'] = 'failed', str(exc)
+                runner.log(f'关闭安小信未确认：{exc}')
         state['completed_at'] = now().isoformat()
         save()
         awake.SetThreadExecutionState(0x80000000)

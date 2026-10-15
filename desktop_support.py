@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 import sys
 
-VERSION = '1.4.6'
+VERSION = '1.4.7'
 RESOURCE_DIR = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else RESOURCE_DIR
 DATA_DIR = Path(os.environ.get('VIRTUAL_RUN_DATA_DIR') or

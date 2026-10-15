@@ -1,6 +1,6 @@
-# 虚拟跑步 1.4.6 / Virtual Run
+# 虚拟跑步 1.4.7 / Virtual Run
 
-Windows 桌面路线模拟与 Android 定位测试工具，桌面版本为 **1.4.6**。通过官方 Android Emulator 和 ADB 操作测试界面，支持路线预览、起点准备、登录、短时试跑、每日定时任务、后台画面预览与一键停用。仓库同时包含独立 Android 模拟位置应用源码。
+Windows 桌面路线模拟与 Android 定位测试工具，桌面版本为 **1.4.7**。通过官方 Android Emulator 和 ADB 操作测试界面，支持路线预览、起点准备、登录、短时试跑、每日定时任务、后台画面预览与一键停用。仓库同时包含独立 Android 模拟位置应用源码。
 
 本仓库的源码树 **不包含安小信 APK、反编译代码、账号、运行日志、Android SDK、系统镜像或安装包**。安小信是独立第三方应用，不受本项目 MIT 许可证覆盖；需要自行取得有权使用的安装包。此工具适用于有授权的定位与界面测试，请遵守目标服务的规则，不将模拟轨迹冒充真实运动记录。
 
@@ -61,7 +61,7 @@ $env:ANDROID_SDK_ROOT = 'C:\Android\Sdk'
 python build_windows.py
 ```
 
-产物为 `dist/虚拟跑步-1.4.6-Windows.exe` 和完整 ZIP，包含本地 Python、ADB、说明、快捷方式与卸载器。历史 Windows 版本可在 [Releases 存档](https://github.com/suiyuan1145/virtual_run/releases/tag/legacy-windows-archive) 下载，存档不代表最新版本。图标已提供；仅重新生成图标时需要 Pillow。
+产物为 `dist/虚拟跑步-1.4.7-Windows.exe` 和完整 ZIP，包含本地 Python、ADB、说明、快捷方式与卸载器。历史 Windows 版本可在 [Releases 存档](https://github.com/suiyuan1145/virtual_run/releases/tag/legacy-windows-archive) 下载，存档不代表最新版本。图标已提供；仅重新生成图标时需要 Pillow。
 
 ## Android 源码
 
@@ -115,4 +115,8 @@ python -m unittest discover -s . -p 'test_*.py' -v
 
 ## 当前验证范围
 
-1.4.6 已通过 85 项自动测试，并实测后台屏幕预览和结束结果页识别。已在官方模拟器验证约一小时的自动开始、路线发送和结束流程；平台对记录的最终判定仍需在原应用核对。
+1.4.7 新增结束后自动关闭安小信；关闭顺序、旧记录保护与失败处理已通过自动测试。此前已实测后台屏幕预览和结束结果页识别。已在官方模拟器验证约一小时的自动开始、路线发送和结束流程；平台对记录的最终判定仍需在原应用核对。
+
+## 结束后自动关闭安小信（1.4.7）
+
+晨跑、60 秒试跑和一键跑步测试在确认本次记录结束后，先保存结果截图与日志，再自动关闭安小信，保留模拟器供下次使用。结束未确认或检测到仍打开的跑步页面时，保留安小信供检查。状态中的 app_closed 表示已确认应用进程退出；close_error 记录关闭失败原因。
